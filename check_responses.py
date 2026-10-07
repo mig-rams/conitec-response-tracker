@@ -2,38 +2,74 @@ import requests
 import re
 import csv
 import os
+import time
 from datetime import datetime, timezone
 
 URL = "https://brasilparticipativo.presidencia.gov.br/processes/consultas-publicas-conitec/f/5686/"
 
-# Download the page
-response = requests.get(
-    URL,
-    timeout=30,
-    headers={
-        "User-Agent": "Mozilla/5.0"
-    }
-)
-response.raise_for_status()
+headers = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/154.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "Connection": "keep-alive",
+}
 
-# Look for "Respostas" and the number associated with it
+# Try several times in case the government server temporarily
+# closes the connection.
+for attempt in range(5):
+    try:
+        response = requests.get(
+            URL,
+            headers=headers,
+            timeout=30,
+        )
+
+        response.raise_for_status()
+        break
+
+    except requests.exceptions.SSLError as e:
+        print(f"SSL error, attempt {attempt + 1}/5")
+
+        if attempt == 4:
+            raise
+
+        time.sleep(5)
+
+# Search the downloaded page for the response count
 text = response.text
 
-match = re.search(r'(\d[\d.]*)\s*Respostas', text, re.IGNORECASE)
+match = re.search(
+    r'(\d[\d.]*)\s*Respostas',
+    text,
+    re.IGNORECASE
+)
 
 if not match:
-    raise Exception("Could not find the response count on the page.")
+    raise Exception("Could not find 'Respostas' on the page.")
 
-# Convert Brazilian-style number like 3.204 into 3204
-responses = int(match.group(1).replace(".", "").replace(",", ""))
+responses = int(
+    match.group(1)
+    .replace(".", "")
+    .replace(",", "")
+)
 
-# Current UTC time
-timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+timestamp = datetime.now(timezone.utc).strftime(
+    "%Y-%m-%d %H:%M:%S UTC"
+)
 
-# Create CSV if it doesn't exist
 file_exists = os.path.exists("responses.csv")
 
-with open("responses.csv", "a", newline="", encoding="utf-8") as file:
+with open(
+    "responses.csv",
+    "a",
+    newline="",
+    encoding="utf-8"
+) as file:
+
     writer = csv.writer(file)
 
     if not file_exists:
