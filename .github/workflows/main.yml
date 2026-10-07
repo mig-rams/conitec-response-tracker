@@ -24,8 +24,59 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Download page
+        run: |
+          curl -L --retry 5 --retry-delay 5 \
+            -A "Mozilla/5.0" \
+            -o page.html \
+            "https://brasilparticipativo.presidencia.gov.br/processes/consultas-publicas-conitec/f/5686/"
+
       - name: Check responses
-        run: python check_responses.py
+        run: |
+          python -c "import re; t=open('page.html',encoding='utf-8').read(); m=re.search(r'(\d[\d.]*)\s*Respostas',t,re.I); print('RESPOSTAS:',m.group(1) if m else 'NOT FOUND')"
+
+      - name: Save response count
+        run: |
+          python - <<'PY'
+          import re
+          import csv
+          import os
+          from datetime import datetime, timezone
+
+          text = open("page.html", encoding="utf-8").read()
+
+          match = re.search(
+              r'(\d[\d.]*)\s*Respostas',
+              text,
+              re.IGNORECASE
+          )
+
+          if not match:
+              raise Exception("Could not find response count")
+
+          responses = int(match.group(1).replace(".", "").replace(",", ""))
+
+          timestamp = datetime.now(timezone.utc).strftime(
+              "%Y-%m-%d %H:%M:%S UTC"
+          )
+
+          file_exists = os.path.exists("responses.csv")
+
+          with open(
+              "responses.csv",
+              "a",
+              newline="",
+              encoding="utf-8"
+          ) as file:
+              writer = csv.writer(file)
+
+              if not file_exists:
+                  writer.writerow(["timestamp", "responses"])
+
+              writer.writerow([timestamp, responses])
+
+          print(f"{timestamp} → {responses} respostas")
+          PY
 
       - name: Save CSV
         run: |
