@@ -16,14 +16,6 @@ jobs:
       - name: Get repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Install dependencies
-        run: pip install requests
-
       - name: Download page
         run: |
           curl -L --retry 5 --retry-delay 5 \
@@ -31,57 +23,72 @@ jobs:
             -o page.html \
             "https://brasilparticipativo.presidencia.gov.br/processes/consultas-publicas-conitec/f/5686/"
 
-      - name: Check responses
-        run: |
-          python -c "import re; t=open('page.html',encoding='utf-8').read(); m=re.search(r'(\d[\d.]*)\s*Respostas',t,re.I); print('RESPOSTAS:',m.group(1) if m else 'NOT FOUND')"
-
-      - name: Save response count
+      - name: Extract response count
         run: |
           python - <<'PY'
           import re
-          import csv
-          import os
-          from datetime import datetime, timezone
 
           text = open("page.html", encoding="utf-8").read()
 
+          # Remove HTML tags
+          text = re.sub(r"<[^>]+>", " ", text)
+
+          # Find the number immediately before "Respostas"
           match = re.search(
-              r'(\d[\d.]*)\s*Respostas',
+              r"(\d[\d.]*)\s+Respostas",
               text,
               re.IGNORECASE
           )
 
           if not match:
+              print("Could not find response count.")
+              print("Searching for 'Respostas' manually...")
+
+              for match2 in re.finditer(
+                  r".{0,100}Respostas.{0,100}",
+                  text,
+                  re.IGNORECASE
+              ):
+                  print(match2.group(0))
+
               raise Exception("Could not find response count")
 
-          responses = int(match.group(1).replace(".", "").replace(",", ""))
-
-          timestamp = datetime.now(timezone.utc).strftime(
-              "%Y-%m-%d %H:%M:%S UTC"
+          responses = int(
+              match.group(1)
+              .replace(".", "")
+              .replace(",", "")
           )
 
-          file_exists = os.path.exists("responses.csv")
+          print(f"RESPOSTAS: {responses}")
 
-          with open(
-              "responses.csv",
-              "a",
-              newline="",
-              encoding="utf-8"
-          ) as file:
-              writer = csv.writer(file)
-
-              if not file_exists:
-                  writer.writerow(["timestamp", "responses"])
-
-              writer.writerow([timestamp, responses])
-
-          print(f"{timestamp} → {responses} respostas")
+          # Save the number for the next step
+          with open("response_count.txt", "w") as file:
+              file.write(str(responses))
           PY
 
-      - name: Save CSV
+      - name: Save response count to CSV
+        run: |
+          RESPONSES=$(cat response_count.txt)
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          if [ ! -f responses.csv ]; then
+            echo "timestamp,responses" > responses.csv
+          fi
+
+          echo "$TIMESTAMP,$RESPONSES" >> responses.csv
+
+          echo "Saved: $TIMESTAMP → $RESPONSES respostas"
+
+      - name: Commit CSV
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add responses.csv
-          git diff --cached --quiet || git commit -m "Update response count"
-          git push
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update response count"
+            git push
+          fi
