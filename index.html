@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CONITEC Response Tracker</title>
+
+    <title>Monitor de Respostas — CONITEC</title>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -67,6 +68,10 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
         }
 
+        .chart-card h2 {
+            margin-top: 0;
+        }
+
         .chart-container {
             position: relative;
             height: 450px;
@@ -112,7 +117,7 @@
 
 <div class="container">
 
-    <h1>CONITEC Response Tracker</h1>
+    <h1>Monitor de Respostas da CONITEC</h1>
 
     <div class="subtitle">
         Brasil Participativo — Consulta Pública CONITEC
@@ -123,22 +128,22 @@
         <div class="cards">
 
             <div class="card">
-                <div class="label">Current responses</div>
+                <div class="label">Total de respostas</div>
                 <div class="value" id="current">—</div>
             </div>
 
             <div class="card">
-                <div class="label">Since last check</div>
+                <div class="label">Desde a última verificação</div>
                 <div class="value" id="lastChange">—</div>
             </div>
 
             <div class="card">
-                <div class="label">Last 24 hours</div>
+                <div class="label">Últimas 24 horas</div>
                 <div class="value" id="dayChange">—</div>
             </div>
 
             <div class="card">
-                <div class="label">Average / hour</div>
+                <div class="label">Média por hora</div>
                 <div class="value" id="average">—</div>
             </div>
 
@@ -146,14 +151,14 @@
 
         <div class="chart-card">
 
-            <h2>Response history</h2>
+            <h2>Histórico de respostas</h2>
 
             <div class="chart-container">
                 <canvas id="responseChart"></canvas>
             </div>
 
             <div class="updated" id="updated">
-                Loading...
+                Carregando...
             </div>
 
         </div>
@@ -168,46 +173,62 @@ async function loadData() {
 
     try {
 
-        // Cache-busting so the dashboard gets the newest CSV
         const url = "responses.csv?t=" + Date.now();
 
         const response = await fetch(url);
 
         if (!response.ok) {
-            throw new Error("Could not load responses.csv");
+            throw new Error("Não foi possível carregar os dados.");
         }
 
         const text = await response.text();
 
-        const lines = text.trim().split("\n");
+        const lines = text.trim().split(/\r?\n/);
 
         if (lines.length < 2) {
-            throw new Error("Not enough data yet.");
+            throw new Error("Ainda não há dados suficientes.");
         }
 
         const data = lines.slice(1)
             .map(line => {
 
-                const parts = line.split(",");
+                const comma = line.lastIndexOf(",");
+
+                if (comma === -1) {
+                    return null;
+                }
+
+                const timestamp =
+                    line.substring(0, comma).trim();
+
+                const responses =
+                    Number(line.substring(comma + 1).trim());
 
                 return {
-                    timestamp: parts[0],
-                    responses: Number(parts[1])
+                    timestamp,
+                    responses
                 };
 
             })
-            .filter(row => !isNaN(row.responses));
+            .filter(row =>
+                row &&
+                !isNaN(row.responses)
+            );
 
         if (data.length === 0) {
-            throw new Error("No valid response data found.");
+            throw new Error("Nenhum dado válido encontrado.");
         }
 
         const latest = data[data.length - 1];
 
         document.getElementById("current").textContent =
-            latest.responses.toLocaleString();
+            latest.responses.toLocaleString("pt-BR");
 
-        // Change since previous check
+
+        // ==========================
+        // DESDE A ÚLTIMA VERIFICAÇÃO
+        // ==========================
+
         if (data.length >= 2) {
 
             const previous = data[data.length - 2];
@@ -216,23 +237,35 @@ async function loadData() {
                 latest.responses - previous.responses;
 
             document.getElementById("lastChange").textContent =
-                (change >= 0 ? "+" : "") + change.toLocaleString();
+                (change >= 0 ? "+" : "") +
+                change.toLocaleString("pt-BR");
 
         }
 
-        // Last 24 hours
+
+        // ==========================
+        // ÚLTIMAS 24 HORAS
+        // ==========================
+
         const latestTime =
-            new Date(latest.timestamp.replace(" UTC", "Z"));
+            new Date(
+                latest.timestamp.replace(" UTC", "Z")
+            );
 
         const yesterday =
-            new Date(latestTime.getTime() - 24 * 60 * 60 * 1000);
+            new Date(
+                latestTime.getTime() -
+                24 * 60 * 60 * 1000
+            );
 
         let oldData = data[0];
 
         for (const row of data) {
 
             const rowTime =
-                new Date(row.timestamp.replace(" UTC", "Z"));
+                new Date(
+                    row.timestamp.replace(" UTC", "Z")
+                );
 
             if (rowTime <= yesterday) {
                 oldData = row;
@@ -245,13 +278,19 @@ async function loadData() {
 
         document.getElementById("dayChange").textContent =
             (dayChange >= 0 ? "+" : "") +
-            dayChange.toLocaleString();
+            dayChange.toLocaleString("pt-BR");
 
-        // Average responses per hour
+
+        // ==========================
+        // MÉDIA POR HORA
+        // ==========================
+
         if (data.length >= 2) {
 
             const firstTime =
-                new Date(data[0].timestamp.replace(" UTC", "Z"));
+                new Date(
+                    data[0].timestamp.replace(" UTC", "Z")
+                );
 
             const hours =
                 (latestTime - firstTime) / 3600000;
@@ -266,27 +305,54 @@ async function loadData() {
 
                 document.getElementById("average").textContent =
                     (average >= 0 ? "+" : "") +
-                    average.toFixed(1);
+                    average.toLocaleString(
+                        "pt-BR",
+                        {
+                            minimumFractionDigits: 1,
+                            maximumFractionDigits: 1
+                        }
+                    );
 
             }
 
         }
 
-        document.getElementById("updated").textContent =
-            "Last recorded check: " + latest.timestamp;
 
-        // Graph
+        // ==========================
+        // ÚLTIMA ATUALIZAÇÃO
+        // ==========================
+
+        document.getElementById("updated").textContent =
+            "Última verificação: " +
+            latest.timestamp;
+
+
+        // ==========================
+        // GRÁFICO
+        // ==========================
+
         const labels = data.map(row => {
 
             const date =
-                new Date(row.timestamp.replace(" UTC", "Z"));
+                new Date(
+                    row.timestamp.replace(" UTC", "Z")
+                );
 
-            return date.toLocaleString();
+            return date.toLocaleString(
+                "pt-BR",
+                {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit"
+                }
+            );
 
         });
 
         const values =
             data.map(row => row.responses);
+
 
         new Chart(
             document.getElementById("responseChart"),
@@ -297,7 +363,7 @@ async function loadData() {
                     labels: labels,
 
                     datasets: [{
-                        label: "Responses",
+                        label: "Respostas",
                         data: values,
                         borderWidth: 2,
                         pointRadius: 2,
@@ -315,11 +381,48 @@ async function loadData() {
                     },
 
                     scales: {
+
                         y: {
-                            beginAtZero: false
+                            beginAtZero: false,
+
+                            ticks: {
+                                callback: function(value) {
+                                    return value.toLocaleString("pt-BR");
+                                }
+                            }
                         }
+
+                    },
+
+                    plugins: {
+
+                        legend: {
+                            display: true
+                        },
+
+                        tooltip: {
+
+                            callbacks: {
+
+                                label: function(context) {
+
+                                    return (
+                                        "Respostas: " +
+                                        context.parsed.y.toLocaleString(
+                                            "pt-BR"
+                                        )
+                                    );
+
+                                }
+
+                            }
+
+                        }
+
                     }
+
                 }
+
             }
         );
 
@@ -327,7 +430,7 @@ async function loadData() {
 
         document.getElementById("dashboard").innerHTML =
             '<div class="error">' +
-            'Could not load the response data: ' +
+            'Erro ao carregar os dados: ' +
             error.message +
             '</div>';
 
