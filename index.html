@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CONITEC Response Tracker</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f5f6f8;
+            color: #1f2937;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 32px;
+        }
+
+        .subtitle {
+            color: #6b7280;
+            margin-bottom: 30px;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 25px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 22px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .label {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .value {
+            font-size: 30px;
+            font-weight: bold;
+        }
+
+        .chart-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 450px;
+        }
+
+        .updated {
+            margin-top: 20px;
+            color: #6b7280;
+            font-size: 13px;
+            text-align: right;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        @media (max-width: 800px) {
+            .cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 500px) {
+            .cards {
+                grid-template-columns: 1fr;
+            }
+
+            h1 {
+                font-size: 25px;
+            }
+
+            .chart-container {
+                height: 350px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>CONITEC Response Tracker</h1>
+
+    <div class="subtitle">
+        Brasil Participativo — Consulta Pública CONITEC
+    </div>
+
+    <div id="dashboard">
+
+        <div class="cards">
+
+            <div class="card">
+                <div class="label">Current responses</div>
+                <div class="value" id="current">—</div>
+            </div>
+
+            <div class="card">
+                <div class="label">Since last check</div>
+                <div class="value" id="lastChange">—</div>
+            </div>
+
+            <div class="card">
+                <div class="label">Last 24 hours</div>
+                <div class="value" id="dayChange">—</div>
+            </div>
+
+            <div class="card">
+                <div class="label">Average / hour</div>
+                <div class="value" id="average">—</div>
+            </div>
+
+        </div>
+
+        <div class="chart-card">
+
+            <h2>Response history</h2>
+
+            <div class="chart-container">
+                <canvas id="responseChart"></canvas>
+            </div>
+
+            <div class="updated" id="updated">
+                Loading...
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+async function loadData() {
+
+    try {
+
+        // Cache-busting so the dashboard gets the newest CSV
+        const url = "responses.csv?t=" + Date.now();
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error("Could not load responses.csv");
+        }
+
+        const text = await response.text();
+
+        const lines = text.trim().split("\n");
+
+        if (lines.length < 2) {
+            throw new Error("Not enough data yet.");
+        }
+
+        const data = lines.slice(1)
+            .map(line => {
+
+                const parts = line.split(",");
+
+                return {
+                    timestamp: parts[0],
+                    responses: Number(parts[1])
+                };
+
+            })
+            .filter(row => !isNaN(row.responses));
+
+        if (data.length === 0) {
+            throw new Error("No valid response data found.");
+        }
+
+        const latest = data[data.length - 1];
+
+        document.getElementById("current").textContent =
+            latest.responses.toLocaleString();
+
+        // Change since previous check
+        if (data.length >= 2) {
+
+            const previous = data[data.length - 2];
+
+            const change =
+                latest.responses - previous.responses;
+
+            document.getElementById("lastChange").textContent =
+                (change >= 0 ? "+" : "") + change.toLocaleString();
+
+        }
+
+        // Last 24 hours
+        const latestTime =
+            new Date(latest.timestamp.replace(" UTC", "Z"));
+
+        const yesterday =
+            new Date(latestTime.getTime() - 24 * 60 * 60 * 1000);
+
+        let oldData = data[0];
+
+        for (const row of data) {
+
+            const rowTime =
+                new Date(row.timestamp.replace(" UTC", "Z"));
+
+            if (rowTime <= yesterday) {
+                oldData = row;
+            }
+
+        }
+
+        const dayChange =
+            latest.responses - oldData.responses;
+
+        document.getElementById("dayChange").textContent =
+            (dayChange >= 0 ? "+" : "") +
+            dayChange.toLocaleString();
+
+        // Average responses per hour
+        if (data.length >= 2) {
+
+            const firstTime =
+                new Date(data[0].timestamp.replace(" UTC", "Z"));
+
+            const hours =
+                (latestTime - firstTime) / 3600000;
+
+            if (hours > 0) {
+
+                const totalIncrease =
+                    latest.responses - data[0].responses;
+
+                const average =
+                    totalIncrease / hours;
+
+                document.getElementById("average").textContent =
+                    (average >= 0 ? "+" : "") +
+                    average.toFixed(1);
+
+            }
+
+        }
+
+        document.getElementById("updated").textContent =
+            "Last recorded check: " + latest.timestamp;
+
+        // Graph
+        const labels = data.map(row => {
+
+            const date =
+                new Date(row.timestamp.replace(" UTC", "Z"));
+
+            return date.toLocaleString();
+
+        });
+
+        const values =
+            data.map(row => row.responses);
+
+        new Chart(
+            document.getElementById("responseChart"),
+            {
+                type: "line",
+
+                data: {
+                    labels: labels,
+
+                    datasets: [{
+                        label: "Responses",
+                        data: values,
+                        borderWidth: 2,
+                        pointRadius: 2,
+                        tension: 0.2
+                    }]
+                },
+
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+
+                    interaction: {
+                        intersect: false,
+                        mode: "index"
+                    },
+
+                    scales: {
+                        y: {
+                            beginAtZero: false
+                        }
+                    }
+                }
+            }
+        );
+
+    } catch (error) {
+
+        document.getElementById("dashboard").innerHTML =
+            '<div class="error">' +
+            'Could not load the response data: ' +
+            error.message +
+            '</div>';
+
+    }
+
+}
+
+loadData();
+
+</script>
+
+</body>
+</html>
